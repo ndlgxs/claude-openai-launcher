@@ -33,3 +33,6 @@ jobs:
       - name: Run offline integration checks
         shell: pwsh
         run: ./tests/Test-Offline.ps1
+      - name: Run desktop configuration offline checks
+        shell: pwsh
+        run: ./tests/Test-DesktopOffline.ps1

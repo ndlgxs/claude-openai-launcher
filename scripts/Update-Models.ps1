@@ -174,11 +174,15 @@ foreach ($modelId in $selectedModels.Keys) {
         $label = if ($variant -eq $modelId) { $selected.displayName } else {
             '{0} ({1})' -f $selected.displayName, ($variant -replace '^.*\(([^)]+)\)$', '$1')
         }
-        $pickerOptions.Add([ordered]@{
-            model = $variant
-            label = $label
-            description = ('{0}K account context override; compact at {1}K; OpenAI via local proxy' -f ($activeContext / 1000), ($autoCompact / 1000))
-        })
+        # CLI effort is a native session setting, so the picker keeps four raw
+        # models. Fixed suffix IDs remain allowlisted for manual compatibility.
+        if ($variant -eq $modelId) {
+            $pickerOptions.Add([ordered]@{
+                model = $variant
+                label = $label
+                description = ('{0}K context; compact at {1}K; change thinking with /effort' -f ($activeContext / 1000), ($autoCompact / 1000))
+            })
+        }
         $modelSettings[$variant] = [ordered]@{ autoCompactWindow = $autoCompact }
     }
 }

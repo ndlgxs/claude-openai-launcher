@@ -77,6 +77,24 @@ try {
     $directoryPrompt = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-p', $projectPath) | ConvertFrom-Json
     Assert-Offline (@($directoryPrompt.Arguments) -contains $projectPath) 'an existing directory passed as a print prompt is not consumed as a project'
     Assert-Offline ($directoryPrompt.Project -eq (Get-Location).Path) 'a print prompt keeps the caller working directory as its project'
+    $explicitEffort = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol', '-Effort', 'medium', '-p', 'effort fixture') | ConvertFrom-Json
+    Assert-Offline ($explicitEffort.RequestedEffort -eq 'medium') 'launcher captures an explicit reasoning effort'
+    $nativeEffort = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol', '--effort', 'high', '-p', 'effort fixture') | ConvertFrom-Json
+    Assert-Offline ($nativeEffort.RequestedEffort -eq 'high') 'native --effort is normalized before forwarding'
+    Assert-Offline (@($nativeEffort.Arguments | Where-Object { $_ -match '^--?effort(?:=|$)' }).Count -eq 0) 'native reasoning selectors do not remain in forwarded Claude arguments'
+    Assert-Offline ($nativeEffort.FinalNativeEffort -eq 'high' -and @($nativeEffort.NativeEffortArguments).Count -eq 2 -and $nativeEffort.NativeEffortArguments[0] -eq '--effort' -and $nativeEffort.NativeEffortArguments[1] -eq 'high') 'parsed effort becomes exactly one native CLI selector'
+    $equalEfforts = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol(high)', '-Effort', 'high', '--effort=high', '-p', 'effort fixture') | ConvertFrom-Json
+    Assert-Offline ($equalEfforts.RequestedEffort -eq 'high' -and $equalEfforts.RequestedModel -eq 'sol(high)') 'matching model suffix and effort selectors merge consistently'
+    $inlineEffort = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol', '-effort=max', '-p', 'effort fixture') | ConvertFrom-Json
+    Assert-Offline ($inlineEffort.RequestedEffort -eq 'max') 'single-dash equals-form effort is supported'
+    $doubleInlineEffort = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol', '--effort=xhigh', '-p', 'effort fixture') | ConvertFrom-Json
+    Assert-Offline ($doubleInlineEffort.RequestedEffort -eq 'xhigh') 'double-dash equals-form effort is supported'
+    $suffixConflict = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Model', 'sol(low)', '-Effort', 'high') -ExpectFailure
+    Assert-Offline ($suffixConflict -match 'Conflicting reasoning effort') 'different suffix and effort values fail clearly before loading account state'
+    $null = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '-Effort', 'low', '--effort=high') -ExpectFailure
+    $null = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '--effort') -ExpectFailure
+    $null = Invoke-OfflineScript 'Start.ps1' @('-ParseOnly', '--effort=ultra') -ExpectFailure
+    Assert-Offline (-not (Test-Path -LiteralPath $paths.DataRoot)) 'effort parsing and rejection do not create runtime data'
 
     Initialize-LauncherDataDirectory -Paths $paths
     foreach ($directory in @($paths.DataRoot, $paths.BinRoot, $paths.AuthRoot, $paths.LogsRoot)) {
@@ -147,6 +165,30 @@ try {
     Assert-Offline (@(Get-ChildItem -LiteralPath $accountBPaths.AuthRoot -File -ErrorAction SilentlyContinue).Count -eq 0) 'catalog import needs no stored token or network login'
     $settings = Read-TestJson $accountBPaths.SessionSettingsPath
     Assert-Offline ($null -ne $settings.modelPicker) 'model refresh creates explicit Claude picker metadata'
+    # Import only the pure final reasoning selector; never run the launcher's main body.
+    $startParseTokens = $null
+    $startParseErrors = $null
+    $startAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $scriptsRoot 'Start.ps1'), [ref]$startParseTokens, [ref]$startParseErrors)
+    $resolveEffortAst = $startAst.Find({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Resolve-OpenAIModelEffort'
+    }, $true)
+    if ($null -eq $resolveEffortAst) { throw 'The launcher reasoning selector is missing.' }
+    . ([scriptblock]::Create($resolveEffortAst.Extent.Text))
+    foreach ($level in @('low', 'medium', 'high', 'xhigh', 'max')) {
+        $resolvedSelection = Resolve-OpenAIModelEffort -SelectedModel 'gpt-6.1-sol' -RequestedEffort $level -SupportedEfforts @($accountA.profiles.'gpt-6.1-sol'.reasoningLevels)
+        Assert-Offline ($resolvedSelection.Model -eq 'gpt-6.1-sol' -and $resolvedSelection.Effort -eq $level -and @($resolvedSelection.EffortArguments).Count -eq 2 -and $resolvedSelection.EffortArguments[0] -eq '--effort' -and $resolvedSelection.EffortArguments[1] -eq $level) ('account-supported effort preserves a bare model and one native selector: ' + $level)
+    }
+    $consistentSelection = Resolve-OpenAIModelEffort -SelectedModel 'gpt-6.1-sol(high)' -RequestedEffort $equalEfforts.RequestedEffort -SupportedEfforts @($accountA.profiles.'gpt-6.1-sol'.reasoningLevels)
+    Assert-Offline ($consistentSelection.Model -eq 'gpt-6.1-sol' -and $consistentSelection.Effort -eq 'high' -and @($consistentSelection.EffortArguments).Count -eq 2) 'legacy suffix input is converted to a bare model and native effort'
+    $defaultSelection = Resolve-OpenAIModelEffort -SelectedModel 'gpt-6.1-sol' -RequestedEffort '' -SupportedEfforts @($accountA.profiles.'gpt-6.1-sol'.reasoningLevels)
+    Assert-Offline ($defaultSelection.Model -eq 'gpt-6.1-sol' -and $defaultSelection.Effort -eq '' -and @($defaultSelection.EffortArguments).Count -eq 0) 'no chosen effort leaves the model default without injecting a selector'
+    $unsupportedEffortRejected = $false
+    try {
+        $null = Resolve-OpenAIModelEffort -SelectedModel 'gpt-6.1-sol' -RequestedEffort 'max' -SupportedEfforts @($accountB.profiles.'gpt-6.1-sol'.reasoningLevels)
+    }
+    catch { $unsupportedEffortRejected = $_.Exception.Message -match 'does not advertise reasoning level' }
+    Assert-Offline $unsupportedEffortRejected 'a level missing from the account profile is rejected before invocation'
 
     $invalidCatalog = Get-Content -LiteralPath $accountBPath -Raw | ConvertFrom-Json -AsHashtable
     $null = $invalidCatalog.models[2].Remove('max_context_window')

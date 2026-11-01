@@ -94,6 +94,23 @@ try {
     $runtime['updatedAt'] = [DateTime]::UtcNow.ToString('o')
     $authYaml = $paths.AuthRoot.Replace("'", "''")
     $keyYaml = ([string] $runtime['proxyKey']).Replace("'", "''")
+    # Desktop accepts Anthropic-shaped routing IDs, while labels identify the
+    # real OpenAI backend. The suffix on each Desktop picker entry selects effort.
+    $desktopRoutes = [ordered]@{
+        'gpt-6.1-sol' = @('local-claude-sol', 'GPT-6.1 Sol')
+        'gpt-6-astra' = @('local-claude-astra', 'GPT-6 Astra')
+        'gpt-6.1-terra' = @('local-claude-terra', 'GPT-6.1 Terra')
+        'gpt-6-luna' = @('local-claude-luna', 'GPT-6 Luna')
+    }
+    $desktopAliasLines = @('  model-alias:', '    codex:')
+    foreach ($sourceModel in $desktopRoutes.Keys) {
+        $desktopAliasLines += "      - name: '$sourceModel'"
+        $desktopAliasLines += "        alias: '$($desktopRoutes[$sourceModel][0])'"
+        $desktopAliasLines += "        display-name: '$($desktopRoutes[$sourceModel][1])'"
+        $desktopAliasLines += '        fork: true'
+        $desktopAliasLines += '        force-mapping: true'
+    }
+    $desktopAliasesYaml = $desktopAliasLines -join [Environment]::NewLine
     $config = @"
 config-version: 8
 server:
@@ -104,6 +121,7 @@ access:
     - '$keyYaml'
 oauth:
   auth-dir: '$authYaml'
+$desktopAliasesYaml
 management:
   allow-remote: false
   secret-key: ''

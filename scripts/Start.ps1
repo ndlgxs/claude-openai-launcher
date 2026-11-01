@@ -3,6 +3,8 @@
 param(
     [Alias('m')]
     [string] $Model,
+    [ValidateSet('low', 'medium', 'high', 'xhigh', 'max')]
+    [string] $Effort,
     [string] $Project,
     [switch] $ParseOnly,
     # Bind -p explicitly so it is not mistaken for a PowerShell common parameter.
@@ -35,9 +37,13 @@ function Show-LoginHint {
 }
 
 function Get-ClaudeLaunchOptions {
-    param([string] $ExplicitModel, [string[]] $Arguments, [switch] $PrintRequested)
+    param([string] $ExplicitModel, [string] $ExplicitEffort, [string[]] $Arguments, [switch] $PrintRequested)
     $forwarded = New-Object 'System.Collections.Generic.List[string]'
     $argumentModel = ''
+    $requestedEffort = ''
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitEffort)) {
+        $requestedEffort = ConvertTo-OpenAIReasoningEffort $ExplicitEffort
+    }
     $isPrintMode = $PrintRequested.IsPresent
     if ($PrintRequested) { $forwarded.Add('-p') }
     for ($index = 0; $index -lt $Arguments.Count; $index++) {
@@ -59,6 +65,25 @@ function Get-ClaudeLaunchOptions {
             $argumentModel = $Matches[1]
             continue
         }
+        $argumentEffort = $null
+        if ($argument -eq '--effort' -or $argument -eq '-effort') {
+            if ($index + 1 -ge $Arguments.Count -or [string]::IsNullOrWhiteSpace($Arguments[$index + 1]) -or $Arguments[$index + 1].StartsWith('-')) {
+                throw ("{0} requires low, medium, high, xhigh, or max." -f $argument)
+            }
+            $index++
+            $argumentEffort = [string] $Arguments[$index]
+        }
+        elseif ($argument -match '^--?effort=(.*)$') {
+            $argumentEffort = $Matches[1]
+        }
+        if ($null -ne $argumentEffort) {
+            $argumentEffort = ConvertTo-OpenAIReasoningEffort $argumentEffort
+            if ($requestedEffort -ne '' -and $requestedEffort -ne $argumentEffort) {
+                throw ("Conflicting reasoning effort values: '{0}' and '{1}'. Use one level, or repeat the same level." -f $requestedEffort, $argumentEffort)
+            }
+            $requestedEffort = $argumentEffort
+            continue
+        }
         if ($argument -eq '-p' -or $argument -eq '--print' -or $argument -match '^(?:--print|-p)=') {
             $isPrintMode = $true
         }
@@ -67,10 +92,49 @@ function Get-ClaudeLaunchOptions {
     # An explicit launcher -Model takes precedence. Remove every native selector
     # so Claude receives one --model argument, followed by the remaining options.
     $requestedModel = if ([string]::IsNullOrWhiteSpace($ExplicitModel)) { $argumentModel } else { $ExplicitModel }
+    if ($requestedModel -match '\(([^)]*)\)$' -and -not [string]::IsNullOrWhiteSpace($Matches[1])) {
+        $suffixEffort = $Matches[1].ToLowerInvariant()
+        if ($requestedEffort -ne '' -and $requestedEffort -ne $suffixEffort) {
+            throw ("Conflicting reasoning effort: model suffix '{0}' differs from effort option '{1}'." -f $suffixEffort, $requestedEffort)
+        }
+        $requestedEffort = $suffixEffort
+    }
     [pscustomobject]@{
         RequestedModel = $requestedModel
+        RequestedEffort = $requestedEffort
         Arguments = $forwarded.ToArray()
         IsPrintMode = $isPrintMode
+    }
+}
+
+function ConvertTo-OpenAIReasoningEffort {
+    param([AllowEmptyString()] [string] $Value)
+    $normalized = $Value.Trim().ToLowerInvariant()
+    if ($normalized -notin @('low', 'medium', 'high', 'xhigh', 'max')) {
+        throw 'Reasoning effort must be low, medium, high, xhigh, or max.'
+    }
+    return $normalized
+}
+
+function Resolve-OpenAIModelEffort {
+    param([string] $SelectedModel, [string] $RequestedEffort, [string[]] $SupportedEfforts)
+    $baseModel = $SelectedModel -replace '\([^)]*\)$', ''
+    $suffixEffort = ''
+    if ($SelectedModel -match '\(([^)]*)\)$') { $suffixEffort = $Matches[1].ToLowerInvariant() }
+    $effectiveEffort = $RequestedEffort.Trim().ToLowerInvariant()
+    if ($suffixEffort -ne '' -and $effectiveEffort -ne '' -and $suffixEffort -ne $effectiveEffort) {
+        throw ("Conflicting reasoning effort: model suffix '{0}' differs from effort option '{1}'." -f $suffixEffort, $effectiveEffort)
+    }
+    if ($effectiveEffort -eq '') { $effectiveEffort = $suffixEffort }
+    if ($effectiveEffort -ne '' -and $SupportedEfforts -notcontains $effectiveEffort) {
+        throw ("This account model profile does not advertise reasoning level '{0}' for '{1}'." -f $effectiveEffort, $baseModel)
+    }
+    $effortArguments = @()
+    if ($effectiveEffort -ne '') { $effortArguments = @('--effort', $effectiveEffort) }
+    [pscustomobject]@{
+        Model = $baseModel
+        Effort = $effectiveEffort
+        EffortArguments = @($effortArguments)
     }
 }
 
@@ -146,7 +210,7 @@ function Select-OpenAIModel {
 }
 
 try {
-    $launchOptions = Get-ClaudeLaunchOptions -ExplicitModel $Model -Arguments $ClaudeArguments -PrintRequested:$Print
+    $launchOptions = Get-ClaudeLaunchOptions -ExplicitModel $Model -ExplicitEffort $Effort -Arguments $ClaudeArguments -PrintRequested:$Print
     $ClaudeArguments = $launchOptions.Arguments
     # PowerShell binds --verbose to its own common parameter before our parser.
     # Forward that switch so Claude's stream-json mode receives it too.
@@ -166,8 +230,13 @@ try {
     if ($projectItem.PSProvider.Name -ne 'FileSystem') { throw 'Project must be a filesystem directory.' }
     $Project = $projectItem.FullName
     if ($ParseOnly) {
+        $nativeEffortArguments = @()
+        if ($launchOptions.RequestedEffort -ne '') { $nativeEffortArguments = @('--effort', $launchOptions.RequestedEffort) }
         [pscustomobject]@{
             RequestedModel = $launchOptions.RequestedModel
+            RequestedEffort = $launchOptions.RequestedEffort
+            FinalNativeEffort = $launchOptions.RequestedEffort
+            NativeEffortArguments = @($nativeEffortArguments)
             Arguments = @($ClaudeArguments)
             IsPrintMode = $launchOptions.IsPrintMode
             IsInteractive = -not $launchOptions.IsPrintMode
@@ -321,9 +390,12 @@ try {
     if ($null -eq $selectedProfile -or [int]$selectedProfile.contextWindow -le 0) {
         throw 'The selected model has no verified context profile.'
     }
-    if ($selectedModel -match '\(([^)]*)\)$' -and $selectedProfile.reasoningLevels -notcontains $Matches[1]) {
-        throw ('This model profile does not advertise reasoning level: {0}' -f $Matches[1])
-    }
+    # Suffixes remain accepted as launcher input, but the CLI receives a bare
+    # model plus one native --effort option so /effort can change it in-session.
+    $nativeSelection = Resolve-OpenAIModelEffort -SelectedModel $selectedModel `
+        -RequestedEffort $launchOptions.RequestedEffort -SupportedEfforts @($selectedProfile.reasoningLevels)
+    $selectedModel = $nativeSelection.Model
+    $nativeEffortArguments = @($nativeSelection.EffortArguments)
 
     # Change only this launcher process and its child; restore inherited values afterwards.
     $childEnvironment = @{
@@ -363,7 +435,7 @@ try {
         Write-Host ("Starting Claude Code with {0} through the local OpenAI proxy." -f $selectedModel)
         Write-Host ('Context: {0} tokens; auto-compact: {1}; output budget: {2}.' -f $selectedProfile.contextWindow, $selectedProfile.autoCompactWindow, $selectedProfile.maxOutputTokens)
         Set-Location -LiteralPath $Project
-        & $claudePath --settings $sessionSettingsPath --model $selectedModel @ClaudeArguments
+        & $claudePath --settings $sessionSettingsPath --model $selectedModel @nativeEffortArguments @ClaudeArguments
         $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int] $LASTEXITCODE }
     }
     finally {
