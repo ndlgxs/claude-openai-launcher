@@ -42,16 +42,21 @@ if (-not $proxyStatus.Ready) {
 }
 $running = @(Get-CimInstance Win32_Process -Filter "Name='Claude.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -and [string]::Equals([IO.Path]::GetFullPath($_.ExecutablePath), $application, [StringComparison]::OrdinalIgnoreCase) })
 if ($running.Count) {
-    Write-Host 'Claude Desktop is already running. Exit it normally and run start-desktop.cmd again to load the current profile and launch environment; existing sessions were not interrupted.'
+    Write-Host 'Claude App 已在运行；若刚更新配置，请完全退出后重开。'
 }
 else {
     $environment = @{ CLAUDE_CODE_MAX_CONTEXT_TOKENS = [string]$built.Limits.contextWindow; CLAUDE_CODE_MAX_OUTPUT_TOKENS = [string]$built.Limits.maxOutputTokens; CLAUDE_CODE_AUTO_COMPACT_WINDOW = [string]$built.Limits.autoCompactWindow }
     $previous = @{}
     try {
         foreach ($name in $environment.Keys) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $environment[$name], 'Process') }
-        $null = Start-Process -FilePath $application -WorkingDirectory $paths.DataRoot -PassThru
+        # Electron's stdout/stderr must not inherit the menu's terminal. On
+        # Windows Start-Process redirects directly to file handles, so logging
+        # remains independent of this short-lived launcher process.
+        $null = [IO.Directory]::CreateDirectory($paths.LogsRoot)
+        $appLogSuffix = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $null = Start-Process -FilePath $application -WorkingDirectory $paths.DataRoot -WindowStyle Normal -RedirectStandardOutput (Join-Path $paths.LogsRoot ('app-' + $appLogSuffix + '.out.log')) -RedirectStandardError (Join-Path $paths.LogsRoot ('app-' + $appLogSuffix + '.err.log')) -PassThru
     }
     finally { foreach ($name in $previous.Keys) { [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process') } }
-    Write-Host 'Claude Desktop opened with the local OpenAI gateway profile. No Claude account login is needed for this gateway configuration.'
+    Write-Host 'Claude App 已打开。'
 }
-if (-not $machineReady) { Write-Host 'Launch environment limits are supplied for this start. Apply-DesktopContext.ps1 is still needed for persistent Code limits when opening the App another way.' }
+if (-not $machineReady) { Write-Host '要持久应用 App 上下文，请以管理员身份运行 apply-desktop-context.cmd。' }
