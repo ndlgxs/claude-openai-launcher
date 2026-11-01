@@ -60,6 +60,22 @@ claude --version
 
 ## 项目路径、模型和思考强度
 
+也可以双击仓库根目录的 `console.cmd`，使用中文数字菜单管理代理和启动入口。控制台显示当前连接状态、所选项目、CLI 模型和思考强度，提供代理启动 / 停止 / 重启、打开 App、打开独立 CLI 终端、模型资料刷新、OpenAI 登录及管理员上下文配置入口。选择 `0` 退出控制台后，代理继续运行；停止代理使用菜单 `2`。
+
+菜单 `6` 更换项目目录，`7` 选择 CLI 模型，`8` 选择思考强度，随后选择 `5` 打开该项目。App 的模型和强度仍在 App 的模型菜单中选择。控制台不展示账号密钥，不会自动执行模型测试；首次使用仍需按上节安装依赖并登录自己的账号。
+
+```powershell
+.\console.cmd -Project "D:\Projects\My App"
+# 只读取连接状态，不进入菜单、不发送模型请求：
+.\console.cmd -Status
+```
+
+沿用旧安装时可指定本机路径（`StateRoot` 是之前桌面配置使用的私有状态目录）：
+
+```powershell
+.\console.cmd -LegacyInstallRoot "D:\Private\Old Claude OpenAI" -StateRoot "$env:LOCALAPPDATA\ClaudeOpenAI\desktop"
+```
+
 启动时明确传项目目录，可使用带空格的路径；也可以把项目文件夹拖到 `start.cmd` 上。没有指定项目时，使用启动命令所在的当前目录。
 
 ```powershell
