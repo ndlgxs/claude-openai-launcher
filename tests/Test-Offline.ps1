@@ -175,3 +175,8 @@ finally {
     }
     else { Write-Host ('Offline test artifacts retained at: ' + $testRoot) }
 }
+
+# Expected failing child processes leave LASTEXITCODE nonzero. Reaching here
+# means every assertion and cleanup completed, so report success explicitly.
+exit 0
+
