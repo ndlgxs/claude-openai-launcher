@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-11-01",
+  "note": "Published model output capabilities. These values are not account context entitlements. SIWC rejects max_output_tokens; the local output budget does not guarantee the upstream output length.",
+  "models": {
+    "gpt-6.1-sol": {
+      "displayName": "GPT-6.1 Sol",
+      "maxOutputTokens": 128000,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    "gpt-6-astra": {
+      "displayName": "GPT-6 Astra",
+      "maxOutputTokens": 128000,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    },
+    "gpt-6.1-terra": {
+      "displayName": "GPT-6.1 Terra",
+      "maxOutputTokens": 128000,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra"
+    },
+    "gpt-6-luna": {
+      "displayName": "GPT-6 Luna",
+      "maxOutputTokens": 128000,
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    }
+  }
+}

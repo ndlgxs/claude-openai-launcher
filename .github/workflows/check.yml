@@ -1,0 +1,35 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Parse PowerShell source
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -LiteralPath . -Recurse -Filter *.ps1 -File | ForEach-Object {
+            $parseTokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$parseTokens, [ref]$parseErrors)
+            if ($parseErrors.Count -gt 0) {
+              $failed = $true
+              Write-Error ("{0}: {1}" -f $_.FullName, ($parseErrors.Message -join '; ')) -ErrorAction Continue
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Run offline integration checks
+        shell: pwsh
+        run: ./tests/Test-Offline.ps1

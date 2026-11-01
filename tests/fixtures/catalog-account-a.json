@@ -1,0 +1,8 @@
+{
+  "models": [
+    {"slug":"gpt-6.1-sol","visibility":"list","display_name":"Sol fixture A","context_window":200000,"max_context_window":800000,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},
+    {"slug":"gpt-6-astra","visibility":"list","display_name":"Astra fixture A","context_window":200000,"max_context_window":900000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},
+    {"slug":"gpt-6.1-terra","visibility":"list","display_name":"Terra fixture A","context_window":200000,"max_context_window":850000,"default_reasoning_level":"low","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]},
+    {"slug":"gpt-6-luna","visibility":"list","display_name":"Luna fixture A","context_window":200000,"max_context_window":950000,"default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}
+  ]
+}
